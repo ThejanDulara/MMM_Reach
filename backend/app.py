@@ -1,16 +1,19 @@
+# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from joblib import load
+from functools import lru_cache
 import os
 
 app = Flask(__name__)
 CORS(app)
 
-# Load all models on startup
+# ---------- Paths ----------
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
+# ---------- Model files map (unchanged) ----------
 model_files = {
     # TV models
     'TV': 'decision_tree_model_TV.joblib',
@@ -51,11 +54,7 @@ model_files = {
     'Press': 'Random_forest_model_Press.joblib'
 }
 
-models = {
-    name: load(os.path.join(MODEL_DIR, filename))
-    for name, filename in model_files.items()
-}
-
+# ---------- Model ranges (unchanged) ----------
 model_ranges = {
     # TV models
     'TV': (625000, 125000000),
@@ -93,13 +92,20 @@ model_ranges = {
     'Press': (50000, 13100000)
 }
 
+# ---------- Lazy model loader ----------
+@lru_cache(maxsize=None)
+def get_model(model_name: str):
+    path = os.path.join(MODEL_DIR, model_files[model_name])
+    return load(path)
+
+# ---------- Helpers ----------
 def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     X_plot_1d = X_plot.ravel()
     y_pred_1d = y_pred.ravel()
 
     y_smooth = gaussian_filter1d(y_pred_1d, sigma=sigma)
     gradient = np.gradient(y_smooth, X_plot_1d)
-    max_eff = np.max(np.abs(gradient))
+    max_eff = np.max(np.abs(gradient)) or 1.0  # avoid div-by-zero
     eff_percent = (gradient / max_eff) * 100
 
     max_idx = np.argmax(gradient)
@@ -107,31 +113,42 @@ def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     eff_post = eff_percent[post_max]
 
     below_target = np.where(eff_post <= target_efficiency)[0]
-    if len(below_target) > 0:
-        idx = post_max[below_target[0]]
-    else:
-        idx = len(X_plot_1d) - 1
+    idx = post_max[below_target[0]] if len(below_target) > 0 else len(X_plot_1d) - 1
 
     return X_plot_1d[idx], y_smooth[idx]
 
-@app.route("/")
+# ---------- Routes ----------
+@app.get("/")
 def index():
     return "✅ Backend is running!", 200
 
-@app.route("/api/analyze", methods=["POST"])
+@app.post("/api/analyze")
 def analyze():
-    data = request.get_json()
+    data = request.get_json(force=True, silent=True) or {}
     efficiencies = data.get("efficiencies", {})
     selected_models = data.get("models", {})
 
+    # validate required keys
+    required_channels = ['TV', 'Facebook', 'YouTube', 'Radio', 'Press']
+    for ch in required_channels:
+        if ch not in efficiencies:
+            return jsonify(error=f"Missing efficiency for '{ch}'"), 400
+
     results = []
+    for channel in required_channels:
+        model_name = selected_models.get(channel, channel)
 
-    for channel in ['TV', 'Facebook', 'YouTube', 'Radio', 'Press']:
-        model_name = selected_models[channel] if channel in selected_models else channel
-        model = models[model_name]
+        if model_name not in model_files:
+            return jsonify(error=f"Unknown model '{model_name}' for channel '{channel}'"), 400
+
+        # lazy-load model
+        model = get_model(model_name)
         min_val, max_val = model_ranges[model_name]
-        sigma = 450 if model_name.startswith('TV_') else 350
 
+        # broader match for TV family
+        sigma = 450 if model_name.startswith('TV') else 350
+
+        # grid + predict
         x_vals = np.linspace(min_val, max_val, 10000).reshape(-1, 1)
         y_vals = model.predict(x_vals)
         eff = float(efficiencies[channel])
@@ -149,24 +166,16 @@ def analyze():
     total_budget = sum(r['budget'] for r in results)
     total_reach = sum(r['reach'] for r in results)
 
-    return jsonify({
-        "results": results,
-        "total_budget": total_budget,
-        "total_reach": total_reach
-    })
+    return jsonify(
+        results=results,
+        total_budget=total_budget,
+        total_reach=total_reach
+    ), 200
 
-@app.route("/healthz")
+@app.get("/healthz")
 def healthz():
     return {"status": "ok"}, 200
 
+# ---------- Local dev entry ----------
 if __name__ == "__main__":
-    import os
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
-        debug=False
-    )
-
-
-#if __name__ == "__main__":
-   # app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
