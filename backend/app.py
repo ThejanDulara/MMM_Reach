@@ -113,6 +113,13 @@ def get_model(model_name: str):
 
 @app.route("/")
 def index():
+    return jsonify({
+        "ok": True,
+        "message": "✅ Backend is running!"
+    }), 200
+
+"""@app.route("/")
+def index():
     # On boot, log what's inside the models dir (helps catch missing files)
     try:
         contents = sorted(os.listdir(MODEL_DIR))
@@ -123,7 +130,7 @@ def index():
         "message": "✅ Backend is running!",
         "models_dir": MODEL_DIR,
         "models_dir_contents": contents
-    }), 200
+    }), 200"""
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
