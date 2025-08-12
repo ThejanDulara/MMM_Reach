@@ -12,9 +12,9 @@ print("📂 Current files:", os.listdir())
 print("📁 CWD:", os.getcwd())
 CORS(app)
 
-#MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
+MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
-"""model_files = {
+model_files = {
     # TV
     'TV': 'decision_tree_model_TV.joblib',
     'TV 2+': 'TV 2+.joblib',
@@ -88,7 +88,7 @@ model_ranges = {
 
     'Radio': (50000, 10000000),
     'Press': (50000, 13100000),
-}"""
+}
 
 def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     X_plot_1d = X_plot.ravel()
@@ -106,13 +106,13 @@ def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     idx = post_max[below_target[0]] if len(below_target) > 0 else len(X_plot_1d) - 1
     return X_plot_1d[idx], y_smooth[idx]
 
-"""@lru_cache(maxsize=None)
+@lru_cache(maxsize=None)
 def get_model(model_name: str):
     filename = model_files[model_name]
     path = os.path.join(MODEL_DIR, filename)
     if not os.path.exists(path):
         raise FileNotFoundError(f"Model file not found: {path}")
-    return load(path)"""
+    return load(path)
 
 @app.route("/")
 def index():
