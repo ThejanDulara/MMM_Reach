@@ -111,25 +111,11 @@ def get_model(model_name: str):
         raise FileNotFoundError(f"Model file not found: {path}")
     return load(path)
 
-"""@app.route("/")
+@app.route("/")
 def index():
     return jsonify({
         "ok": True,
         "message": "✅ Backend is running!"
-    }), 200"""
-
-@app.route("/")
-def index():
-    # On boot, log what's inside the models dir (helps catch missing files)
-    try:
-        contents = sorted(os.listdir(MODEL_DIR))
-    except Exception as e:
-        contents = [f"(cannot list: {e})"]
-    return jsonify({
-        "ok": True,
-        "message": "✅ Backend is running!",
-        "models_dir": MODEL_DIR,
-        "models_dir_contents": contents
     }), 200
 
 @app.route("/api/analyze", methods=["POST"])
