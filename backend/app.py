@@ -7,9 +7,6 @@ import os
 from functools import lru_cache
 
 app = Flask(__name__)
-print("✅ Flask app started")
-print("📂 Current files:", os.listdir())
-print("📁 CWD:", os.getcwd())
 CORS(app)
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -114,14 +111,14 @@ def get_model(model_name: str):
         raise FileNotFoundError(f"Model file not found: {path}")
     return load(path)
 
-@app.route("/")
+"""@app.route("/")
 def index():
     return jsonify({
         "ok": True,
         "message": "✅ Backend is running!"
-    }), 200
+    }), 200"""
 
-"""@app.route("/")
+@app.route("/")
 def index():
     # On boot, log what's inside the models dir (helps catch missing files)
     try:
@@ -133,7 +130,7 @@ def index():
         "message": "✅ Backend is running!",
         "models_dir": MODEL_DIR,
         "models_dir_contents": contents
-    }), 200"""
+    }), 200
 
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
@@ -180,8 +177,6 @@ def analyze():
 @app.route("/healthz")
 def healthz():
     return {"status": "ok"}, 200
-
-print("🔎 __name__ is:", __name__)  # Add this above
 
 if __name__ == "__main__":
     import os
