@@ -1,21 +1,18 @@
-# app.py
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from joblib import load
-from functools import lru_cache
 import os
+from functools import lru_cache
 
 app = Flask(__name__)
 CORS(app)
 
-# ---- Paths ----
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
-# ---- Model files map (same names you already use) ----
 model_files = {
-    # TV models
+    # TV
     'TV': 'decision_tree_model_TV.joblib',
     'TV 2+': 'TV 2+.joblib',
     'TV 3+': 'TV 3+.joblib',
@@ -39,24 +36,22 @@ model_files = {
     'TV_Apr': 'TV_Apr.joblib',
     'TV_May': 'TV_May.joblib',
 
-    # Facebook models
+    # Facebook
     'FB 1+': 'FB 1+.joblib',
     'FB 4+': 'FB 4+.joblib',
     'FB 6+': 'FB 6+.joblib',
 
-    # YouTube models
+    # YouTube
     'Youtube 1+': 'Youtube 1+.joblib',
     'Youtube 4+': 'Youtube 4+.joblib',
     'Youtube 6+': 'Youtube 6+.joblib',
 
-    # Radio and Press models
+    # Radio / Press (note spelling in filenames)
     'Radio': 'Decition_tree_model_Radio.joblib',
-    'Press': 'Random_forest_model_Press.joblib'
+    'Press': 'Random_forest_model_Press.joblib',
 }
 
-# ---- Model ranges (unchanged) ----
 model_ranges = {
-    # TV models
     'TV': (625000, 125000000),
     'TV 2+': (625000, 125000000),
     'TV 3+': (625000, 125000000),
@@ -79,33 +74,25 @@ model_ranges = {
     'TV_Mar': (366090.55, 177300000),
     'TV_Apr': (366090.55, 215100000),
     'TV_May': (366090.55, 123450000),
-    # Facebook
+
     'FB 1+': (60000, 17997000),
     'FB 4+': (63000, 1320000),
     'FB 6+': (63000, 1680000),
-    # YouTube
+
     'Youtube 1+': (360000, 23700000),
     'Youtube 4+': (360000, 23700000),
     'Youtube 6+': (360000, 23700000),
-    # Radio and Press
+
     'Radio': (50000, 10000000),
-    'Press': (50000, 13100000)
+    'Press': (50000, 13100000),
 }
 
-# ---- Lazy model loader ----
-@lru_cache(maxsize=None)
-def get_model(model_name: str):
-    path = os.path.join(MODEL_DIR, model_files[model_name])
-    return load(path)
-
-# ---- Helper ----
 def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     X_plot_1d = X_plot.ravel()
     y_pred_1d = y_pred.ravel()
-
     y_smooth = gaussian_filter1d(y_pred_1d, sigma=sigma)
     gradient = np.gradient(y_smooth, X_plot_1d)
-    max_eff = np.max(np.abs(gradient)) or 1.0  # avoid div-by-zero
+    max_eff = np.max(np.abs(gradient))
     eff_percent = (gradient / max_eff) * 100
 
     max_idx = np.argmax(gradient)
@@ -116,61 +103,74 @@ def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     idx = post_max[below_target[0]] if len(below_target) > 0 else len(X_plot_1d) - 1
     return X_plot_1d[idx], y_smooth[idx]
 
-# ---- Routes ----
-@app.get("/")
-def index():
-    return "✅ Backend is running!", 200
+@lru_cache(maxsize=None)
+def get_model(model_name: str):
+    filename = model_files[model_name]
+    path = os.path.join(MODEL_DIR, filename)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Model file not found: {path}")
+    return load(path)
 
-@app.post("/api/analyze")
+@app.route("/")
+def index():
+    # On boot, log what's inside the models dir (helps catch missing files)
+    try:
+        contents = sorted(os.listdir(MODEL_DIR))
+    except Exception as e:
+        contents = [f"(cannot list: {e})"]
+    return jsonify({
+        "ok": True,
+        "message": "✅ Backend is running!",
+        "models_dir": MODEL_DIR,
+        "models_dir_contents": contents
+    }), 200
+
+@app.route("/api/analyze", methods=["POST"])
 def analyze():
-    data = request.get_json(force=True, silent=True) or {}
+    data = request.get_json() or {}
     efficiencies = data.get("efficiencies", {})
     selected_models = data.get("models", {})
 
-    required_channels = ['TV', 'Facebook', 'YouTube', 'Radio', 'Press']
-    for ch in required_channels:
-        if ch not in efficiencies:
-            return jsonify(error=f"Missing efficiency for '{ch}'"), 400
+    try:
+        results = []
+        for channel in ['TV', 'Facebook', 'YouTube', 'Radio', 'Press']:
+            model_name = selected_models.get(channel, channel)
+            model = get_model(model_name)  # lazy load, cached
+            min_val, max_val = model_ranges[model_name]
+            sigma = 450 if model_name.startswith('TV_') else 350
 
-    results = []
-    for channel in required_channels:
-        model_name = selected_models.get(channel, channel)
-        if model_name not in model_files:
-            return jsonify(error=f"Unknown model '{model_name}' for channel '{channel}'"), 400
+            x_vals = np.linspace(min_val, max_val, 10000).reshape(-1, 1)
+            y_vals = model.predict(x_vals)
+            eff = float(efficiencies[channel])
 
-        model = get_model(model_name)  # lazy load + cached
-        min_val, max_val = model_ranges[model_name]
+            budget, reach = calculate_efficiency_point(x_vals, y_vals, eff, sigma)
 
-        # broader match for all TV variants
-        sigma = 450 if model_name.startswith('TV') else 350
+            results.append({
+                "channel": channel,
+                "selected_model": model_name,
+                "target_efficiency": eff,
+                "budget": float(budget),
+                "reach": float(reach)
+            })
 
-        x_vals = np.linspace(min_val, max_val, 10000).reshape(-1, 1)
-        y_vals = model.predict(x_vals)
-        eff = float(efficiencies[channel])
+        total_budget = sum(r['budget'] for r in results)
+        total_reach = sum(r['reach'] for r in results)
 
-        budget, reach = calculate_efficiency_point(x_vals, y_vals, eff, sigma)
+        return jsonify({
+            "results": results,
+            "total_budget": total_budget,
+            "total_reach": total_reach
+        }), 200
 
-        results.append({
-            "channel": channel,
-            "selected_model": model_name,
-            "target_efficiency": eff,
-            "budget": float(budget),
-            "reach": float(reach)
-        })
+    except FileNotFoundError as e:
+        return jsonify({"error": "Model file missing", "details": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": "Server error", "details": str(e)}), 500
 
-    total_budget = sum(r['budget'] for r in results)
-    total_reach = sum(r['reach'] for r in results)
-
-    return jsonify(
-        results=results,
-        total_budget=total_budget,
-        total_reach=total_reach
-    ), 200
-
-@app.get("/healthz")
+@app.route("/healthz")
 def healthz():
     return {"status": "ok"}, 200
 
-# ---- Local dev entry ----
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    import os
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=False)
