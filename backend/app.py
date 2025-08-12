@@ -10,10 +10,10 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-# ---------- Paths ----------
+# ---- Paths ----
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
-# ---------- Model files map (unchanged) ----------
+# ---- Model files map (same names you already use) ----
 model_files = {
     # TV models
     'TV': 'decision_tree_model_TV.joblib',
@@ -54,7 +54,7 @@ model_files = {
     'Press': 'Random_forest_model_Press.joblib'
 }
 
-# ---------- Model ranges (unchanged) ----------
+# ---- Model ranges (unchanged) ----
 model_ranges = {
     # TV models
     'TV': (625000, 125000000),
@@ -92,13 +92,13 @@ model_ranges = {
     'Press': (50000, 13100000)
 }
 
-# ---------- Lazy model loader ----------
+# ---- Lazy model loader ----
 @lru_cache(maxsize=None)
 def get_model(model_name: str):
     path = os.path.join(MODEL_DIR, model_files[model_name])
     return load(path)
 
-# ---------- Helpers ----------
+# ---- Helper ----
 def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     X_plot_1d = X_plot.ravel()
     y_pred_1d = y_pred.ravel()
@@ -114,10 +114,9 @@ def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
 
     below_target = np.where(eff_post <= target_efficiency)[0]
     idx = post_max[below_target[0]] if len(below_target) > 0 else len(X_plot_1d) - 1
-
     return X_plot_1d[idx], y_smooth[idx]
 
-# ---------- Routes ----------
+# ---- Routes ----
 @app.get("/")
 def index():
     return "✅ Backend is running!", 200
@@ -128,7 +127,6 @@ def analyze():
     efficiencies = data.get("efficiencies", {})
     selected_models = data.get("models", {})
 
-    # validate required keys
     required_channels = ['TV', 'Facebook', 'YouTube', 'Radio', 'Press']
     for ch in required_channels:
         if ch not in efficiencies:
@@ -137,18 +135,15 @@ def analyze():
     results = []
     for channel in required_channels:
         model_name = selected_models.get(channel, channel)
-
         if model_name not in model_files:
             return jsonify(error=f"Unknown model '{model_name}' for channel '{channel}'"), 400
 
-        # lazy-load model
-        model = get_model(model_name)
+        model = get_model(model_name)  # lazy load + cached
         min_val, max_val = model_ranges[model_name]
 
-        # broader match for TV family
+        # broader match for all TV variants
         sigma = 450 if model_name.startswith('TV') else 350
 
-        # grid + predict
         x_vals = np.linspace(min_val, max_val, 10000).reshape(-1, 1)
         y_vals = model.predict(x_vals)
         eff = float(efficiencies[channel])
@@ -176,6 +171,6 @@ def analyze():
 def healthz():
     return {"status": "ok"}, 200
 
-# ---------- Local dev entry ----------
+# ---- Local dev entry ----
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
