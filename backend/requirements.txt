@@ -4,3 +4,4 @@ scikit-learn
 scipy
 joblib
 lightgbm 
+gunicorn
