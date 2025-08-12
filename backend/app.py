@@ -3,12 +3,13 @@ from flask_cors import CORS
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from joblib import load
+from functools import lru_cache
 import os
 
 app = Flask(__name__)
 CORS(app)
 
-# Load all models on startup
+# --- Paths & model registry ---
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 model_files = {
@@ -51,11 +52,6 @@ model_files = {
     'Press': 'Random_forest_model_Press.joblib'
 }
 
-models = {
-    name: load(os.path.join(MODEL_DIR, filename))
-    for name, filename in model_files.items()
-}
-
 model_ranges = {
     # TV models
     'TV': (625000, 125000000),
@@ -80,19 +76,30 @@ model_ranges = {
     'TV_Mar': (366090.55, 177300000),
     'TV_Apr': (366090.55, 215100000),
     'TV_May': (366090.55, 123450000),
+
     # Facebook
     'FB 1+': (60000, 17997000),
     'FB 4+': (63000, 1320000),
     'FB 6+': (63000, 1680000),
+
     # YouTube
     'Youtube 1+': (360000, 23700000),
     'Youtube 4+': (360000, 23700000),
     'Youtube 6+': (360000, 23700000),
+
     # Radio and Press
     'Radio': (50000, 10000000),
     'Press': (50000, 13100000)
 }
 
+# --- Lazy-load models and cache them (prevents slow cold starts) ---
+@lru_cache(maxsize=None)
+def load_model(model_name: str):
+    filename = model_files[model_name]
+    path = os.path.join(MODEL_DIR, filename)
+    return load(path)
+
+# --- Core math ---
 def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     X_plot_1d = X_plot.ravel()
     y_pred_1d = y_pred.ravel()
@@ -107,35 +114,40 @@ def calculate_efficiency_point(X_plot, y_pred, target_efficiency, sigma):
     eff_post = eff_percent[post_max]
 
     below_target = np.where(eff_post <= target_efficiency)[0]
-    if len(below_target) > 0:
-        idx = post_max[below_target[0]]
-    else:
-        idx = len(X_plot_1d) - 1
+    idx = post_max[below_target[0]] if len(below_target) > 0 else len(X_plot_1d) - 1
 
     return X_plot_1d[idx], y_smooth[idx]
 
+# --- Routes ---
 @app.route("/")
 def index():
     return "✅ Backend is running!", 200
 
+@app.route("/healthz")
+def healthz():
+    return {"status": "ok"}, 200
+
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
-    data = request.get_json()
+    data = request.get_json(force=True)
     efficiencies = data.get("efficiencies", {})
     selected_models = data.get("models", {})
 
     results = []
-
     for channel in ['TV', 'Facebook', 'YouTube', 'Radio', 'Press']:
-        model_name = selected_models[channel] if channel in selected_models else channel
-        model = models[model_name]
+        model_name = selected_models.get(channel, channel)
+
+        model = load_model(model_name)  # lazy + cached
         min_val, max_val = model_ranges[model_name]
-        sigma = 450 if model_name.startswith('TV_') else 350
 
-        x_vals = np.linspace(min_val, max_val, 10000).reshape(-1, 1)
+        # TV curves are typically smoother → use a higher sigma
+        sigma = 450 if model_name.startswith('TV') else 350
+
+        # Keep this reasonably sized to avoid heavy CPU on free/pro tiers
+        x_vals = np.linspace(min_val, max_val, 5000).reshape(-1, 1)
         y_vals = model.predict(x_vals)
-        eff = float(efficiencies[channel])
 
+        eff = float(efficiencies[channel])
         budget, reach = calculate_efficiency_point(x_vals, y_vals, eff, sigma)
 
         results.append({
@@ -143,7 +155,7 @@ def analyze():
             "selected_model": model_name,
             "target_efficiency": eff,
             "budget": float(budget),
-            "reach": float(reach)
+            "reach": float(reach),
         })
 
     total_budget = sum(r['budget'] for r in results)
@@ -153,20 +165,12 @@ def analyze():
         "results": results,
         "total_budget": total_budget,
         "total_reach": total_reach
-    })
+    }), 200
 
-@app.route("/healthz")
-def healthz():
-    return {"status": "ok"}, 200
-
+# --- Local dev entrypoint (Railway uses gunicorn) ---
 if __name__ == "__main__":
-    import os
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
+        port=int(os.environ.get("PORT", 8080)),
         debug=False
     )
-
-
-#if __name__ == "__main__":
-   # app.run(debug=True)
