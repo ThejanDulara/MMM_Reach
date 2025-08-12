@@ -7,6 +7,9 @@ import os
 from functools import lru_cache
 
 app = Flask(__name__)
+print("✅ Flask app started")
+print("📂 Current files:", os.listdir())
+print("📁 CWD:", os.getcwd())
 CORS(app)
 
 #MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -177,6 +180,8 @@ def analyze():
 @app.route("/healthz")
 def healthz():
     return {"status": "ok"}, 200
+
+print("🔎 __name__ is:", __name__)  # Add this above
 
 if __name__ == "__main__":
     import os
