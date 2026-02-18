@@ -1,17 +1,20 @@
 // src/authCheck.js
 export async function checkAuth() {
   const hostname = window.location.hostname;
-  const isLocal = hostname.includes("localhost") || hostname.includes("127.");
+  const isLocal =
+    hostname.includes("localhost") || hostname.includes("127.");
+
+  // 🧪 LOCAL DEV → skip auth completely
+  if (isLocal) {
+    console.warn("🧪 Localhost detected — skipping authentication");
+    return true;
+  }
 
   // 🧠 API base (Flask backend)
-  const apiBase = isLocal
-    ? "http://localhost:8000/api"
-    : "https://mtmbackend-production.up.railway.app/api";
+  const apiBase = "https://mtmbackend-production.up.railway.app/api";
 
   // 🧠 Main portal base for login
-  const portalBase = isLocal
-    ? "http://localhost:5173"
-    : "https://www.mtmgroup.agency"; // ✅ fixed with 'www'
+  const portalBase = "https://www.mtmgroup.agency"; // ✅ fixed with 'www'
 
   try {
     const res = await fetch(`${apiBase}/auth/me`, {
@@ -20,14 +23,13 @@ export async function checkAuth() {
 
     if (!res.ok) {
       const current = encodeURIComponent(window.location.href);
-      // ✅ always redirect to the official sign-in page on 'www'
       window.location.href = `${portalBase}/signin?redirect=${current}`;
-      return false; // 🚫 not authorized
+      return false;
     }
 
     const user = await res.json();
     console.log("✅ Authenticated user:", user);
-    return true; // ✅ authorized
+    return true;
   } catch (err) {
     console.error("❌ Auth check failed:", err);
     const current = encodeURIComponent(window.location.href);
